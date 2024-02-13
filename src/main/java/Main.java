@@ -24,6 +24,7 @@ import edu.wpi.first.cscore.CvSink;
 import edu.wpi.first.cscore.CvSource;
 import edu.wpi.first.cscore.MjpegServer;
 import edu.wpi.first.cscore.UsbCamera;
+import edu.wpi.first.cscore.VideoMode.PixelFormat;
 import edu.wpi.first.cscore.VideoSource;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEvent;
@@ -91,12 +92,17 @@ import org.opencv.imgproc.Imgproc;
 public final class Main {
     private static String configFile = "/boot/frc.json";
 
+    private final static CvSource outputStream = new CvSource("ProcessedVideo", PixelFormat.kMJPEG, 160, 120, 30);
+    private final static MjpegServer mjpegServer = new MjpegServer("serve_ProcessedVideo", 1184);
+    static {
+        mjpegServer.setSource(outputStream);
+    }
+
     private final static NetworkTableInstance inst = NetworkTableInstance.getDefault();
 
     /* Robot pose for field positioning */
     private final static NetworkTable table = inst.getTable("Camera");
-    private final static DoublePublisher colPub = table.getDoubleTopic("OrangeValue").publish();
-    private final static DoublePublisher colPub2 = table.getDoubleTopic("CenterPosition").publish();
+    private final static DoubleArrayPublisher colPub2 = table.getDoubleArrayTopic("NotePose").publish();
 
     @SuppressWarnings("MemberName")
     public static class CameraConfig {
@@ -345,7 +351,8 @@ public final class Main {
         return orangePercentage;
     }
 
-    public static double locateNote(VideoSource camera, int width, int height) {
+    public static double[] locateNote(VideoSource camera, int width, int height, double fov, double ringRadius,
+            double camElevation) {
         // Create a CvSink to grab frames from the camera
         CvSink cvSink = new CvSink("cvSink");
         cvSink.setSource(camera);
@@ -356,7 +363,7 @@ public final class Main {
         // Grab a frame from the camera
         if (cvSink.grabFrame(image) == 0) {
             System.out.println("Empty Image!");
-            return 0.0;
+            return new double[] { 0.0, 0.0 };
         }
 
         // Convert image to HSV color space
@@ -405,8 +412,30 @@ public final class Main {
             }
         }
 
+        int leftX = (int) leftmostX;
+        int rightX = (int) rightmostX;
+
+        int centerOffset = (leftX - rightX) / 2;
+
+        final Mat rgb = new Mat();
+        Imgproc.cvtColor(morphedImage, rgb, Imgproc.COLOR_GRAY2BGR);
+
+        Imgproc.line(rgb, new Point(leftX, 0), new Point(leftX, height), new Scalar(0, 0, 255), 1);
+        Imgproc.line(rgb, new Point(rightX, 0), new Point(rightX, height), new Scalar(0, 0, 255), 1);
+
+        Imgproc.line(rgb, new Point(0, (int) height / 2), new Point(width, (int) height / 2), new Scalar(255, 0, 0), 1);
+        Imgproc.line(rgb, new Point((int) width / 2, 0), new Point((int) width / 2, height), new Scalar(255, 0, 0), 1);
+
+        Imgproc.line(rgb, new Point(80 - centerOffset, 0), new Point(80 - centerOffset, height), new Scalar(0, 255, 0),
+                1);
+        Imgproc.line(rgb, new Point(80 + centerOffset, 0), new Point(80 + centerOffset, height), new Scalar(0, 255, 0),
+                1);
+
+        // Imgproc.line(rgb, new Point(0, 0), new Point(100, 100), new Scalar(0, 0,
+        // 255), 6);
+
         // Calculate the center or use leftmostX and rightmostX for further processing
-        double centerX = (leftmostX + rightmostX) / 2.0;
+        // double centerX = (leftmostX + rightmostX) / 2.0;
 
         // Mat processedImage = new Mat();
         // // Draw contours on the processed image for visualization
@@ -417,20 +446,38 @@ public final class Main {
         // // HighGui.imshow("Processed Image", processedImage);
         // // HighGui.waitKey(0);
 
-        // image.release();
-        // hsvImage.release();
-        // mask.release();
-        // morphedImage.release();
-        // hierarchy.release();
-        // processedImage.release();
-
         // // Put the processed image on CameraServer
 
         // if (!processedImage.empty()) {
         // outputStream.putFrame(processedImage);
         // }
 
-        return (centerX <= width) ? centerX : 0;
+        // return (centerX <= width) ? centerX : 0;
+
+        outputStream.putFrame(rgb);
+
+        final double internalAngleOffset = ((((leftmostX + rightmostX) / 2) - leftmostX) * 2 * fov) / width;
+        final double hypDistance = ringRadius / Math.tan(internalAngleOffset);
+
+        if (hypDistance <= camElevation) {
+            return new double[] { 0.0, 0.0 };
+        }
+
+        final double nD = Math.sqrt(Math.pow(hypDistance, 2) - Math.pow(camElevation, 2));
+        final double nTheta = (fov / width) * ((leftmostX + rightmostX - width) / 2);
+
+        if (nTheta > 2) {
+            return new double[] { 0.0, 0.0 };
+        }
+
+        image.release();
+        hsvImage.release();
+        mask.release();
+        morphedImage.release();
+        hierarchy.release();
+        rgb.release();
+
+        return new double[] { nD, nTheta };
 
     }
 
@@ -508,8 +555,7 @@ public final class Main {
         TimerTask postLoop = new TimerTask() {
             @Override
             public void run() {
-                colPub.set(detectOrangePercentage(cameras.get(0)));
-                colPub2.set(locateNote(cameras.get(0), 160, 120));
+                colPub2.set(locateNote(cameras.get(0), 160, 120, 0.9564404, 0.1778, 0.257556));
             }
         };
 
