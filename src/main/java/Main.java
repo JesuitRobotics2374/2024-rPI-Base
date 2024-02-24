@@ -29,12 +29,12 @@ import edu.wpi.first.cscore.VideoSource;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableEvent;
 import edu.wpi.first.networktables.NetworkTableInstance;
-import edu.wpi.first.networktables.StringPublisher;
-import edu.wpi.first.networktables.StringTopic;
-import edu.wpi.first.networktables.BooleanPublisher;
-import edu.wpi.first.networktables.BooleanTopic;
+// import edu.wpi.first.networktables.StringPublisher;
+// import edu.wpi.first.networktables.StringTopic;
+// import edu.wpi.first.networktables.BooleanPublisher;
+// import edu.wpi.first.networktables.BooleanTopic;
 import edu.wpi.first.networktables.DoubleArrayPublisher;
-import edu.wpi.first.networktables.DoublePublisher;
+// import edu.wpi.first.networktables.DoublePublisher;
 import edu.wpi.first.vision.VisionPipeline;
 import edu.wpi.first.vision.VisionThread;
 
@@ -326,6 +326,7 @@ public final class Main {
         // Grab a frame from the camera
         if (cvSink.grabFrame(image) == 0) {
             System.out.println("Empty Image!");
+            cvSink.close();
             return 0.0;
         }
 
@@ -348,6 +349,8 @@ public final class Main {
         double totalPixels = image.rows() * image.cols();
         double orangePercentage = (orangePixelCount / totalPixels) * 100.0;
 
+        cvSink.close();
+
         return orangePercentage;
     }
 
@@ -363,6 +366,7 @@ public final class Main {
         // Grab a frame from the camera
         if (cvSink.grabFrame(image) == 0) {
             System.out.println("Empty Image!");
+            cvSink.close();
             return new double[] { 0.0, 0.0 };
         }
 
@@ -456,6 +460,8 @@ public final class Main {
 
         outputStream.putFrame(rgb);
 
+        cvSink.close();
+
         final double internalAngleOffset = ((((leftmostX + rightmostX) / 2) - leftmostX) * 2 * fov) / width;
         final double hypDistance = ringRadius / Math.tan(internalAngleOffset);
 
@@ -476,6 +482,7 @@ public final class Main {
         morphedImage.release();
         hierarchy.release();
         rgb.release();
+        cvSink.close();
 
         return new double[] { nD, nTheta };
 
