@@ -41,6 +41,7 @@ import edu.wpi.first.vision.VisionThread;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
+import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
@@ -354,8 +355,10 @@ public final class Main {
         return orangePercentage;
     }
 
-    public static double[] locateNote(VideoSource camera, int width, int height, double fov, double ringRadius,
-            double camElevation) {
+    // PROCESSING
+
+    public static double[] locateNote(VideoSource camera, int width, int height,
+            double fov, double ringRadius, double camElevation) {
         // Create a CvSink to grab frames from the camera
         CvSink cvSink = new CvSink("cvSink");
         cvSink.setSource(camera);
@@ -399,6 +402,8 @@ public final class Main {
 
         // Now iterate through the filtered contours to find leftmost and rightmost
         // points
+        // Now iterate through the filtered contours to find leftmost and rightmost
+        // points
         double leftmostX = Double.MAX_VALUE;
         double rightmostX = Double.MIN_VALUE;
 
@@ -416,6 +421,51 @@ public final class Main {
             }
         }
 
+        // Refine contours based on the shape of the note
+        List<MatOfPoint> refinedContours = new ArrayList<>();
+
+        for (MatOfPoint contour : filteredContours) {
+            MatOfPoint2f approxCurve = new MatOfPoint2f();
+            MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
+
+            // Approximate the contour to a polygon
+            double epsilon = 0.02 * Imgproc.arcLength(contour2f, true);
+            Imgproc.approxPolyDP(contour2f, approxCurve, epsilon, true);
+
+            // Convert back to MatOfPoint and add to refinedContours if it has 4 vertices
+            // (rectangle-like shape)
+            MatOfPoint approxMat = new MatOfPoint(approxCurve.toArray());
+            if (approxCurve.rows() == 4) {
+                refinedContours.add(approxMat);
+            }
+        }
+
+        // Now iterate through the refined contours to find leftmost and rightmost
+        // points
+        // and calculate the center
+        double refinedCenterX = 0.0;
+        double refinedLeftmostX = Double.MAX_VALUE;
+        double refinedRightmostX = Double.MIN_VALUE;
+        if (!refinedContours.isEmpty()) {
+
+            for (MatOfPoint contour : refinedContours) {
+                for (Point point : contour.toList()) {
+                    double x = point.x;
+
+                    if (x < refinedLeftmostX) {
+                        refinedLeftmostX = x;
+                    }
+
+                    if (x > refinedRightmostX) {
+                        refinedRightmostX = x;
+                    }
+                }
+            }
+
+            // Calculate the center based on the refined contour
+            refinedCenterX = (refinedLeftmostX + refinedRightmostX) / 2.0;
+        }
+
         int leftX = (int) leftmostX;
         int rightX = (int) rightmostX;
 
@@ -423,6 +473,9 @@ public final class Main {
 
         final Mat rgb = new Mat();
         Imgproc.cvtColor(morphedImage, rgb, Imgproc.COLOR_GRAY2BGR);
+
+        // Draw polygons on the image for visualization
+        Imgproc.drawContours(rgb, refinedContours, -1, new Scalar(0, 255, 0), 2);
 
         Imgproc.line(rgb, new Point(leftX, 0), new Point(leftX, height), new Scalar(0, 0, 255), 1);
         Imgproc.line(rgb, new Point(rightX, 0), new Point(rightX, height), new Scalar(0, 0, 255), 1);
@@ -462,7 +515,8 @@ public final class Main {
 
         cvSink.close();
 
-        final double internalAngleOffset = ((((leftmostX + rightmostX) / 2) - leftmostX) * 2 * fov) / width;
+        final double internalAngleOffset = ((((refinedLeftmostX + refinedRightmostX) / 2) - refinedLeftmostX) * 2 * fov)
+                / width;
         final double hypDistance = ringRadius / Math.tan(internalAngleOffset);
 
         if (hypDistance <= camElevation) {
@@ -470,7 +524,7 @@ public final class Main {
         }
 
         final double nD = Math.sqrt(Math.pow(hypDistance, 2) - Math.pow(camElevation, 2));
-        final double nTheta = (fov / width) * ((leftmostX + rightmostX - width) / 2);
+        final double nTheta = (fov / width) * ((refinedLeftmostX + refinedRightmostX - width) / 2);
 
         if (nTheta > 2) {
             return new double[] { 0.0, 0.0 };
